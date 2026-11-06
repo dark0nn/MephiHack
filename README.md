@@ -78,6 +78,53 @@ docker build -t doe-gpu --build-arg TORCH_INDEX=https://download.pytorch.org/whl
 - **Mac:** Docker не видит видеоядро M1/M2/M3 (`mps`), поэтому в контейнере обучение идёт на CPU.
   Для обучения на Mac быстрее локальная установка (см. ниже), а Docker подходит для проверок, бейзлайнов и инференса.
 
+## Если установка упала: разбор всех сценариев
+
+Найдите в таблице текст, который напечатал терминал (достаточно совпадения по нескольким словам),
+и выполните шаги из правого столбца по порядку. Каждый шаг — отдельная команда или действие.
+
+### Этап 1. Установка Docker
+
+| Что напечатал терминал | Что это значит | Что делать |
+| --- | --- | --- |
+| `docker: command not found` (Mac/Linux) или `'docker' is not recognized as an internal or external command` (Windows) | Docker не установлен, или терминал открыт до установки | 1. Поставить Docker Desktop (раздел «Установка Docker» выше). 2. Закрыть терминал полностью и открыть заново. 3. Проверить: `docker --version` |
+| `Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?` | Docker установлен, но не запущен | Mac/Windows: открыть приложение Docker Desktop и подождать 1–2 минуты, пока внизу слева не появится «Engine running». Linux: `sudo systemctl start docker` |
+| `error during connect: ... open //./pipe/docker_engine: The system cannot find the file specified` (Windows) | То же самое: Docker Desktop не запущен | Запустить Docker Desktop из меню «Пуск», дождаться «Engine running», повторить команду |
+| `permission denied while trying to connect to the Docker daemon socket` (Linux) | Вашему пользователю не разрешено управлять Docker | 1. `sudo usermod -aG docker $USER` 2. Выйти из системы и войти заново (или перезагрузиться). 3. Проверить: `docker run --rm hello-world` |
+| `WSL 2 installation is incomplete` или `WSL update required` (Windows) | Не установлена или устарела подсистема Linux для Windows | 1. Открыть PowerShell **от имени администратора**. 2. `wsl --install` 3. `wsl --update` 4. Перезагрузить компьютер. 5. Запустить Docker Desktop заново |
+| `Virtualization support not detected` или `Hardware assisted virtualization ... must be enabled` (Windows) | В BIOS выключена виртуализация процессора | 1. Перезагрузиться и войти в BIOS (обычно клавиша F2, F10, Del или Esc при включении). 2. Включить пункт `Intel Virtualization Technology (VT-x)` или `SVM Mode` (AMD). 3. Сохранить (F10) и загрузиться. 4. Запустить Docker Desktop |
+| Mac: «Docker.app не может быть открыто» или `incompatible CPU` | Скачан установщик не под тот процессор | Меню Apple → «Об этом Mac»: если «Чип Apple M…», скачать версию **Apple Silicon**; если «Процессор Intel», — версию **Intel Chip** |
+| `docker run --rm hello-world` печатает `Unable to find image` и дальше ошибку сети | Docker не может скачивать образы из интернета | См. строку про `failed to resolve source metadata` в этапе 2 ниже |
+
+### Этап 2. Сборка образа (`docker build -t doe .`)
+
+| Что напечатал терминал | Что это значит | Что делать |
+| --- | --- | --- |
+| `failed to read dockerfile: open Dockerfile: no such file or directory` или `unable to prepare context` | Команда запущена не из папки проекта | 1. `cd ~/Documents/MephiHack` (Windows: `cd $HOME\Documents\MephiHack`). 2. Проверить, что там есть `Dockerfile`: `ls` (Windows: `dir`). 3. Повторить `docker build -t doe .` — **с точкой в конце** |
+| `"docker build" requires exactly 1 argument` | Забыта точка в конце команды | Писать ровно так: `docker build -t doe .` |
+| `failed to resolve source metadata for docker.io/library/python...`, `TLS handshake timeout`, `i/o timeout`, `429 Too Many Requests` или `denied: ... access forbidden` | Docker не может скачать базовый образ Python из Docker Hub (часто бывает в РФ: Docker Hub ограничен) | 1. Docker Desktop → Settings (шестерёнка) → Docker Engine. 2. В открывшийся текст добавить строку `"registry-mirrors": ["https://mirror.gcr.io"],` сразу после первой `{`. 3. Apply & Restart. 4. Повторить сборку. Linux: то же самое в файле `/etc/docker/daemon.json`, затем `sudo systemctl restart docker`. Если не помогло — включить VPN и повторить |
+| `manifest for python:3.15-slim not found` | Такого образа Python нет | Открыть `Dockerfile`, в первой строке заменить на `FROM python:3.13-slim`, сохранить, повторить сборку |
+| `No matching distribution found for torch` или `Could not find a version that satisfies the requirement torch` | Под эту версию Python ещё нет PyTorch | То же: в `Dockerfile` поставить `FROM python:3.13-slim` и собрать заново |
+| `Read timed out`, `Connection broken`, `ProxyError` на шаге `pip install` | Обрывается скачивание пакетов (PyTorch весит сотни мегабайт) | 1. Просто повторить `docker build -t doe .` — скачанное сохраняется. 2. Если повторяется — включить или выключить VPN и попробовать снова |
+| `no space left on device` | Закончилось место на диске для Docker | 1. `docker system prune -a` (удалит старые образы, на вопрос ответить `y`). 2. Docker Desktop → Settings → Resources → Disk: увеличить. 3. Освободить место на компьютере: нужно около 5 ГБ |
+| `Killed` или `exit code: 137` на шаге `pip install` | Не хватило памяти при установке | Docker Desktop → Settings → Resources → Memory: поставить 4–8 ГБ, Apply & Restart, повторить сборку |
+| Сборка падает на шаге `pytest` с `FAILED tests/...` | Код скачан не полностью или с ошибкой | 1. `git pull` — получить свежую версию. 2. Повторить сборку. 3. Если снова падает — прислать вывод разработчикам |
+| Сборка идёт 10–20 минут и скачивает гигабайты | Это нормально в первый раз | Подождать. Следующие сборки занимают секунды |
+
+### Этап 3. Запуск контейнера
+
+| Что напечатал терминал | Что это значит | Что делать |
+| --- | --- | --- |
+| `Unable to find image 'doe:latest' locally` и затем `pull access denied` | Образ ещё не собран или собран под другим именем | Сначала `docker build -t doe .`, потом запуск |
+| `invalid reference format` (Windows) | В PowerShell не сработал `$PWD` | Заменить `$PWD` на `${PWD}` (PowerShell) или на `%cd%` (обычная командная строка) |
+| `port is already allocated` | Порт 8888 занят (например, уже запущен Jupyter) | Заменить `-p 8888:8888` на `-p 8889:8888` и открыть http://localhost:8889 |
+| `could not select device driver "" with capabilities: [[gpu]]` | Нет поддержки видеокарты в Docker | Linux/Windows с NVIDIA: поставить NVIDIA Container Toolkit (ссылка в «Установка Docker»). Mac: видеокарта в Docker недоступна, запускать без `--gpus all` |
+| `Killed`, код `137`, `Bus error` или `DataLoader worker ... killed` во время обучения | Контейнеру не хватает памяти | 1. Docker Desktop → Settings → Resources → Memory: 8 ГБ или больше. 2. Добавить в команду `--shm-size=2g`. 3. Или запускать обучение с `--batch 4 --workers 0` |
+| Команда отработала, а папка `outputs/` пустая | Результаты остались внутри контейнера | Добавить в команду `-v "$PWD/outputs:/app/outputs"` (Windows PowerShell: `-v "${PWD}/outputs:/app/outputs"`) |
+| Поменяли код, а результат прежний | Код копируется в образ при сборке | Пересобрать: `docker build -t doe .` |
+
+Ничего не подошло? Скопируйте **весь** текст из терминала — от команды до последней строки — и отправьте разработчикам.
+
 ## Без Docker (локально)
 
 Нужен Python той же версии, что в первой строке `Dockerfile` (`FROM python:...`).
@@ -89,67 +136,6 @@ pip install -r requirements.txt
 python scripts/make_examples.py
 python scripts/check_env.py
 ```
-
-## Если что-то не работает
-
-### Четыре самых частых сценария
-
-**1. Docker не запускается**
-
-Ошибка: `docker: command not found`, `'docker' is not recognized` или `Cannot connect to the Docker daemon`.
-Причина: Docker не установлен или не запущен.
-
-```bash
-docker --version             # нет ответа -> поставить Docker Desktop, перезапустить терминал
-docker run --rm hello-world  # ошибка про daemon -> открыть Docker Desktop, дождаться «Engine running»
-```
-
-На Linux вместо Docker Desktop: `sudo systemctl start docker`.
-
-**2. Сборка образа падает на установке пакетов**
-
-Ошибка: `No matching distribution found for torch` или `manifest for python:... not found`.
-Причина: под версию Python из `Dockerfile` ещё нет нужной сборки PyTorch или образа Python.
-Что делать: в первой строке `Dockerfile` поставить версию постарше и собрать заново.
-
-```bash
-# в Dockerfile:  FROM python:3.13-slim
-docker build -t doe .
-```
-
-**3. Результатов нет в `outputs/` или правки в коде не применяются**
-
-Причина: контейнер работает со своей копией файлов.
-- Нет результатов → в команде не хватает `-v "$PWD/outputs:/app/outputs"`. На Windows в PowerShell пишите `${PWD}`, в cmd — `%cd%`.
-- Правки не видны → код копируется в образ при сборке. Пересоберите: `docker build -t doe .`
-
-**4. Обучение обрывается**
-
-Ошибка: `Killed`, код `137`, `Bus error` или `DataLoader worker ... killed`.
-Причина: контейнеру не хватает памяти.
-- Docker Desktop → Settings → Resources → Memory: 8 ГБ или больше.
-- Добавить к `docker run` флаг `--shm-size=2g`.
-- Или уменьшить нагрузку: `--batch 4 --workers 0`.
-
-### Другие ошибки
-
-| Ошибка | Что делать |
-| --- | --- |
-| `docker: command not found` / `'docker' is not recognized` | Docker не установлен или терминал открыт до установки. Поставить Docker Desktop, закрыть и заново открыть терминал. |
-| `Cannot connect to the Docker daemon` / `error during connect` | Docker не запущен. Mac/Windows: открыть Docker Desktop и дождаться «Engine running». Linux: `sudo systemctl start docker`. |
-| `permission denied while trying to connect to the Docker daemon socket` (Linux) | `sudo usermod -aG docker $USER`, затем выйти из системы и зайти снова. |
-| Windows: `WSL 2 installation is incomplete` / `Virtualization support not detected` | В PowerShell от администратора: `wsl --update`, перезагрузиться. Если не помогло, включить виртуализацию (Intel VT-x / AMD SVM) в BIOS. |
-| `manifest for python:... not found` при сборке | Такой версии Python нет в Docker Hub. Поменять первую строку `Dockerfile` на `FROM python:3.13-slim` и собрать заново. |
-| `No matching distribution found for torch` | Под эту версию Python ещё нет сборки PyTorch. Взять версию Python постарше в `FROM` (например, 3.13) или ослабить ограничение `torch>=...` в `requirements.txt`. |
-| Сборка падает на шаге `pytest` | Сломан код или физика: в выводе видно, какой тест упал. Исправить код и собрать заново. |
-| `no space left on device` | Почистить старые образы: `docker system prune -a`. В Docker Desktop можно увеличить диск: Settings → Resources → Disk. |
-| Процесс оборвался с `Killed` или кодом `137` | Контейнеру не хватило памяти. В Docker Desktop: Settings → Resources → Memory (поставить 8 ГБ и больше), либо уменьшить `--batch`. |
-| `Bus error` / `DataLoader worker ... killed` | Мало общей памяти: добавить `--shm-size=2g` к `docker run` или запускать обучение с `--workers 0`. |
-| `could not select device driver "" with capabilities: [[gpu]]` | Не установлен NVIDIA Container Toolkit (см. «Установка Docker»). На Mac GPU в Docker недоступен в принципе. |
-| `port is already allocated` (Jupyter) | Порт 8888 занят. Запустить с `-p 8889:8888` и открыть http://localhost:8889 |
-| После запуска пустая папка `outputs/` | Забыт флаг `-v "$PWD/outputs:/app/outputs"`. На Windows проверить, что вместо `$PWD` стоит `${PWD}` (PowerShell) или `%cd%` (cmd). |
-| Правки в коде не применяются | Образ собран со старым кодом: `docker build -t doe .` или монтировать код через `-v "$PWD:/app"`. |
-| Сборка очень долгая или скачивает гигабайты | Для CPU-образа PyTorch ставится с `download.pytorch.org/whl/cpu`, это нормально только в первый раз. Повторная сборка берёт кэш, пока не меняется `requirements.txt`. |
 
 ## Основные команды
 
