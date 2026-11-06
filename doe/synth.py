@@ -10,7 +10,7 @@ _CHARS = string.ascii_uppercase + string.digits + "АБВГДЕЖЗИКЛМНО�
 
 
 def _font(size: int):
-    for name in ("DejaVuSans-Bold.ttf", "Arial Bold.ttf", "Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    for name in ("DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf", "Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
                  "/Library/Fonts/Arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
         try:
             return ImageFont.truetype(name, size)

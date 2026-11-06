@@ -29,6 +29,23 @@ source .venv/bin/activate
 
 Если `python3` не найден: `brew install python@3.12` (или установщик с python.org).
 
+## Установка на Windows
+
+1. Поставить Python 3.12 (в PowerShell): `winget install Python.Python.3.12`,
+   потом **закрыть и заново открыть** терминал / VS Code. Заглушка `python3` из Microsoft Store
+   не подходит (ошибка `Permission denied`): её можно выключить в «Параметры → Приложения →
+   Псевдонимы выполнения приложений».
+2. В терминале **Git Bash** (в VS Code: Terminal → bash):
+
+```bash
+cd ~/MephiHack
+bash setup_env.sh
+```
+
+Перед каждой работой: `source .venv/Scripts/activate` (на Windows — `Scripts`, не `bin`).
+Если у ноутбука видеокарта NVIDIA, после установки поставить PyTorch с CUDA:
+`pip install torch --index-url https://download.pytorch.org/whl/cu128 --force-reinstall`.
+
 ## Основные команды
 
 | Что | Команда |
