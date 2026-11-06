@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+checkpoints/
+outputs/
+data/images/*
+!data/images/.gitkeep
