@@ -3,8 +3,13 @@
     python scripts/train.py --steps 3000 --batch 16              # на GPU (Colab) ~ 10–30 мин
     python scripts/train.py --steps 200 --batch 4 --base 16      # быстрая проверка на ноутбуке
 
-Дообучение готовой сети (ширина сети берётся из чекпоинта):
+Продолжить оборванный запуск с того же шага (те же параметры, тот же лог):
+    python scripts/train.py --continue checkpoints/<run>/last.pt
+
+Новая версия модели поверх готовой (ширина сети берётся из чекпоинта, совпадающие слои
+загружаются, новые учатся с нуля; результат пишется в новый запуск):
     python scripts/train.py --resume checkpoints/<run>/best.pt --steps 2000 --lr 3e-4 --w-worst 1 --gs-iters 5
+  --freeze-loaded N  первые N шагов учить только новые слои, загруженные заморожены
   --w-worst  штраф за худшую из 4 плоскостей (не даёт «жертвовать» дальней картинкой)
   --gs-iters K итераций GS внутри модели после сети (сеть учится давать старт для GS)
 
@@ -22,6 +27,7 @@ from _path import ROOT
 import torch
 
 from doe import DEFAULT
+from doe.checkpoint import load_matching, save_checkpoint
 from doe.data import TargetSets, fixed_set
 from doe.losses import HoloLoss
 from doe.model import HoloNet, UNet, count_params
@@ -57,31 +63,65 @@ def main():
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--run", default=time.strftime("unet_%Y%m%d_%H%M"))
-    ap.add_argument("--resume", default=None, help="путь к .pt, чтобы дообучить готовую сеть")
+    ap.add_argument("--resume", default=None, help="путь к .pt: веса как старт для новой версии модели")
+    ap.add_argument("--continue", dest="cont", default=None,
+                    help="путь к last.pt: продолжить тот же запуск с того же шага")
+    ap.add_argument("--freeze-loaded", type=int, default=0,
+                    help="при --resume: столько первых шагов не трогать загруженные слои")
     ap.add_argument("--gs-iters", type=int, default=0, help="итераций GS внутри модели после сети")
     ap.add_argument("--w-worst", type=float, default=0.0, help="вес штрафа за худшую плоскость")
     args = ap.parse_args()
 
     cfg = DEFAULT
+    ck_cont = None
+    if args.cont:
+        # Продолжение: все параметры берём из чекпоинта, менять можно только устройство и workers
+        ck_cont = torch.load(args.cont, map_location="cpu")
+        if "opt" not in ck_cont:
+            raise SystemExit("В этом чекпоинте нет состояния оптимизатора (старый формат). "
+                             "Используйте --resume, чтобы дообучить с этих весов.")
+        keep = {"device": args.device, "workers": args.workers, "cont": args.cont}
+        args = argparse.Namespace(**{**vars(ap.parse_args([])), **ck_cont["args"], **keep})
     device = get_device(args.device)
     torch.manual_seed(0)
     out = ROOT / "checkpoints" / args.run
     out.mkdir(parents=True, exist_ok=True)
 
     ck_resume = None
-    if args.resume:
+    if args.resume and not args.cont:
         ck_resume = torch.load(args.resume, map_location=device)
         a = ck_resume.get("args", {})
         args.base, args.depth = a.get("base", args.base), a.get("depth", args.depth)
     unet = UNet(in_ch=cfg.planes, base=args.base, depth=args.depth).to(device)
-    if ck_resume is not None:
-        unet.load_state_dict(ck_resume["model"])
-        print(f"Дообучаю {args.resume} (шаг {ck_resume.get('step')}, val КК {ck_resume.get('val', {}).get('pcc', 0):.3f})")
+    loaded = []
+    if ck_cont is not None:
+        unet.load_state_dict(ck_cont["model"])
+    elif ck_resume is not None:
+        print(f"Старт с весов {args.resume} (шаг {ck_resume.get('step')}, "
+              f"val КК {ck_resume.get('val', {}).get('pcc', 0):.3f})")
+        loaded = load_matching(unet, ck_resume["model"])["loaded"]
     prop = FresnelPropagator(cfg).to(device)
     model = HoloNet(unet, prop, gs_iters=args.gs_iters).to(device)
     loss_fn = HoloLoss(cfg, w_worst=args.w_worst)
     opt = torch.optim.AdamW(unet.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.steps, pct_start=0.1)
+
+    start, best = 1, float("inf")
+    if ck_cont is not None:
+        opt.load_state_dict(ck_cont["opt"])
+        sched.load_state_dict(ck_cont["sched"])
+        start, best = ck_cont["step"] + 1, ck_cont.get("best", float("inf"))
+        print(f"Продолжаю запуск {args.run} с шага {start} из {args.steps}")
+        if start > args.steps:
+            raise SystemExit("Этот запуск уже завершён. Для дообучения используйте --resume.")
+
+    frozen = []
+    if args.freeze_loaded > 0 and loaded:
+        params = dict(unet.named_parameters())
+        frozen = [params[k] for k in loaded if k in params]
+        for p in frozen:
+            p.requires_grad_(False)
+        print(f"Заморожено {len(frozen)} загруженных тензоров на {args.freeze_loaded} шагов")
 
     data = TargetSets(cfg.n, cfg.planes, folder=args.images)
     loader = torch.utils.data.DataLoader(data, batch_size=args.batch, num_workers=args.workers,
@@ -91,16 +131,21 @@ def main():
     print(f"Устройство: {device}; параметров: {count_params(unet):,}; GS внутри: {args.gs_iters}; "
           f"штраф худшей плоскости: {args.w_worst}; "
           f"картинки из папки: {'да' if data.folder else 'нет, только синтетика'}")
-    log = open(out / "log.csv", "w", newline="")
+    log = open(out / "log.csv", "a" if ck_cont is not None else "w", newline="")
     writer = csv.writer(log)
-    writer.writerow(["step", "train_loss", "train_pcc", "train_ssim", "val_loss", "val_pcc", "val_ssim",
-                     "val_worst_pcc", "sec"])
+    if ck_cont is None:
+        writer.writerow(["step", "train_loss", "train_pcc", "train_ssim", "val_loss", "val_pcc", "val_ssim",
+                         "val_worst_pcc", "sec"])
 
-    best = float("inf")
     t0 = time.time()
     run_stats = {"loss": 0.0, "pcc": 0.0, "ssim": 0.0, "worst": 0.0}
     it = iter(loader)
-    for step in range(1, args.steps + 1):
+    for step in range(start, args.steps + 1):
+        if frozen and step == start + args.freeze_loaded:
+            for p in frozen:
+                p.requires_grad_(True)
+            frozen = []
+            print(f"шаг {step}: размораживаю загруженные слои")
         t = next(it).to(device, non_blocking=True)
         phi = model(target_amplitude(t, cfg))
         loss, s = loss_fn(prop.recon_image(phi), t)
@@ -113,7 +158,7 @@ def main():
             run_stats[key] += s[key]
 
         if step % args.val_every == 0 or step == args.steps:
-            n = args.val_every if step % args.val_every == 0 else step % args.val_every
+            n = max(1, min(step - start + 1, args.val_every if step % args.val_every == 0 else step % args.val_every))
             tr = {k: v / n for k, v in run_stats.items()}
             run_stats = {k: 0.0 for k in run_stats}
             v = validate(model, prop, loss_fn, val, cfg, device)
@@ -123,11 +168,10 @@ def main():
             log.flush()
             print(f"шаг {step:>6} | train loss {tr['loss']:.4f} КК {tr['pcc']:.3f} | "
                   f"val loss {v['loss']:.4f} КК {v['pcc']:.3f} (худшая {v['worst']:.3f}) SSIM {v['ssim']:.3f} | {sec:.0f} с")
-            ck = {"model": unet.state_dict(), "args": vars(args), "step": step, "val": v}
-            torch.save(ck, out / "last.pt")
             if v["loss"] < best:
                 best = v["loss"]
-                torch.save(ck, out / "best.pt")
+                save_checkpoint(out / "best.pt", unet, opt, sched, step, best, v, vars(args))
+            save_checkpoint(out / "last.pt", unet, opt, sched, step, best, v, vars(args))
     log.close()
     print("Готово. Лучшая модель:", out / "best.pt")
 
