@@ -57,6 +57,7 @@ bash setup_env.sh
 | Бейзлайны GS и Adam на наборе | `python scripts/run_baseline.py --targets data/examples/shapes` |
 | Быстрая проверка обучения | `python scripts/train.py --steps 200 --batch 4 --base 16 --workers 0` |
 | Полное обучение (лучше на GPU/Colab) | `python scripts/train.py --steps 3000 --batch 16` |
+| Дообучить готовую сеть: штраф худшей плоскости + 5 итераций GS в модели | `python scripts/train.py --resume checkpoints/unet_20261106_2255/best.pt --steps 2000 --lr 3e-4 --w-worst 1 --gs-iters 5` |
 | Финальный результат по ТЗ | `python scripts/infer.py --weights checkpoints/<run>/best.pt --targets <папка с 4 PNG>` |
 | То же + дотюнивание фазы | добавить `--refine 50` |
 

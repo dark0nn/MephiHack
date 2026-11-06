@@ -113,3 +113,30 @@ def test_baselines_run():
     for name, fn in METHODS.items():
         phi = fn(t, iters=3)
         assert phi.shape == (1, DEFAULT.n, DEFAULT.n), name
+
+
+def test_holonet_unrolled_gs_matches_baseline_and_has_finite_grads():
+    torch = pytest.importorskip("torch")
+    from doe.baselines import gs_parallel
+    from doe.losses import HoloLoss
+    from doe.model import HoloNet, UNet
+    from doe.optics import FresnelPropagator, target_amplitude
+
+    torch.manual_seed(0)
+    prop = FresnelPropagator()
+    t = (torch.rand(2, 4, 128, 128) > 0.7).float()          # много нулей — проверка на NaN
+    amp = target_amplitude(t)
+    net = HoloNet(UNet(base=8, depth=2), prop, gs_iters=3)
+
+    # развёрнутый GS внутри модели совпадает с бейзлайном GS от той же стартовой фазы
+    with torch.no_grad():
+        phi0 = net.unet(amp)
+        ref = gs_parallel(t, iters=3, prop=prop, init=phi0)
+        got = net(amp)
+    d = torch.remainder(got - ref + math.pi, 2 * math.pi) - math.pi
+    assert d.abs().max() < 1e-3
+
+    loss, s = HoloLoss(w_worst=1.0)(prop.recon_image(net(amp)), t)
+    loss.backward()
+    assert torch.isfinite(loss) and s["worst"] <= s["pcc"] + 1e-6
+    assert all(torch.isfinite(p.grad).all() for p in net.unet.parameters() if p.grad is not None)

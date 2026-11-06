@@ -18,7 +18,7 @@ from doe import DEFAULT
 from doe.baselines import adam_phase
 from doe.io import load_targets
 from doe.metrics import format_table
-from doe.model import UNet
+from doe.model import HoloNet, UNet
 from doe.optics import FresnelPropagator, get_device, target_amplitude
 from doe.pipeline import finalize_and_save
 
@@ -28,6 +28,7 @@ def main():
     ap.add_argument("--weights", required=True)
     ap.add_argument("--targets", required=True, help="папка с 4 картинками (по алфавиту = плоскости 1..4)")
     ap.add_argument("--refine", type=int, default=0, help="шагов Adam после сети (0 = чистая сеть)")
+    ap.add_argument("--gs-iters", type=int, default=None, help="итераций GS после сети (по умолчанию как при обучении)")
     ap.add_argument("--device", default="auto")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
@@ -36,9 +37,11 @@ def main():
     device = get_device(args.device)
     ck = torch.load(args.weights, map_location=device)
     a = ck.get("args", {})
-    model = UNet(in_ch=cfg.planes, base=a.get("base", 32), depth=a.get("depth", 4)).to(device).eval()
-    model.load_state_dict(ck["model"])
+    unet = UNet(in_ch=cfg.planes, base=a.get("base", 32), depth=a.get("depth", 4)).to(device)
+    unet.load_state_dict(ck["model"])
     prop = FresnelPropagator(cfg).to(device)
+    gs_iters = args.gs_iters if args.gs_iters is not None else a.get("gs_iters", 0)
+    model = HoloNet(unet, prop, gs_iters=gs_iters).to(device).eval()
 
     targets_np = load_targets(args.targets, cfg.n)
     t = torch.from_numpy(targets_np)[None].to(device)
@@ -61,9 +64,10 @@ def main():
 
     out = args.out or str(ROOT / "outputs/infer" / Path(args.targets).name)
     res = finalize_and_save(phi[0].cpu().numpy(), targets_np, out, cfg,
-                            extra={"method": "unet" + (f"+adam{args.refine}" if args.refine else ""),
+                            extra={"method": "unet" + (f"+gs{gs_iters}" if gs_iters else "")
+                                             + (f"+adam{args.refine}" if args.refine else ""),
                                    "net_seconds": net_sec, "refine_seconds": ref_sec})
-    print(f"Сеть: {net_sec * 1000:.1f} мс; дотюнивание: {ref_sec:.2f} с -> {out}")
+    print(f"Сеть{f' + {gs_iters} GS' if gs_iters else ''}: {net_sec * 1000:.1f} мс; дотюнивание: {ref_sec:.2f} с -> {out}")
     print(format_table(res))
 
 

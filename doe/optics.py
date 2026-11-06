@@ -58,8 +58,11 @@ class FresnelPropagator(torch.nn.Module):
         """phi: (B, N, N) или (N, N), радианы -> комплексные поля (B, P, N, N)."""
         if phi.dim() == 2:
             phi = phi[None]
-        H = torch.polar(torch.ones_like(phi), phi)[:, None]     # (B, 1, N, N)
-        F = torch.fft.fft2(torch.fft.ifftshift(H * self.chirp, dim=(-2, -1)))
+        return self.forward_field(torch.polar(torch.ones_like(phi), phi))
+
+    def forward_field(self, H: torch.Tensor) -> torch.Tensor:
+        """Комплексное поле на ДОЭ (B, N, N) -> поля на плоскостях (B, P, N, N)."""
+        F = torch.fft.fft2(torch.fft.ifftshift(H[:, None] * self.chirp, dim=(-2, -1)))
         return torch.fft.fftshift(F, dim=(-2, -1)) / self.cfg.n
 
     def backward_field(self, K: torch.Tensor) -> torch.Tensor:

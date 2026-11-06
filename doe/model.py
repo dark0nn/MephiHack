@@ -60,5 +60,31 @@ class UNet(nn.Module):
         return torch.atan2(cs[:, 1], cs[:, 0])
 
 
+class HoloNet(nn.Module):
+    """U-Net + K итераций параллельного GS внутри модели («развёрнутый» GS).
+
+    Сеть даёт стартовую фазу, затем K шагов GS её уточняют. Шаги GS дифференцируемы,
+    поэтому сеть учится выдавать не готовый ответ, а лучший старт для GS.
+    Нормировки z/(|z|+eps) вместо angle() — чтобы не было NaN в градиентах на нулевой амплитуде.
+    """
+
+    def __init__(self, unet: UNet, prop: nn.Module, gs_iters: int = 0, eps: float = 1e-6):
+        super().__init__()
+        self.unet, self.prop, self.gs_iters, self.eps = unet, prop, gs_iters, eps
+
+    def forward(self, amp: torch.Tensor) -> torch.Tensor:
+        """amp — целевая амплитуда (B, P, N, N) -> фаза (B, N, N)."""
+        phi = self.unet(amp)
+        if self.gs_iters == 0:
+            return phi
+        H = torch.polar(torch.ones_like(phi), phi)
+        for _ in range(self.gs_iters):
+            K = self.prop.forward_field(H)
+            K = amp * K / (K.abs() + self.eps)
+            G = self.prop.backward_field(K).sum(1)
+            H = G / (G.abs() + self.eps)
+        return torch.atan2(H.imag, H.real)
+
+
 def count_params(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)

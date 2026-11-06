@@ -12,15 +12,17 @@ def scale_invariant_mse(rec: torch.Tensor, tgt: torch.Tensor, eps: float = 1e-8)
 
 
 class HoloLoss(torch.nn.Module):
-    """loss = w_pcc·(1−КК) + w_ssim·(1−SSIM) + w_mse·MSE, усреднение по плоскостям и батчу.
+    """loss = w_pcc·(1−КК) + w_ssim·(1−SSIM) + w_mse·MSE [+ w_worst·(1−КК худшей плоскости)].
 
     rec — восстановления (B, P, N, N) в «единицах картинки» (|K| или |K|²),
     tgt — цели (B, P, N, N) в [0, 1].
     """
 
-    def __init__(self, cfg: Config = DEFAULT, w_pcc: float = 1.0, w_ssim: float = 1.0, w_mse: float = 1.0):
+    def __init__(self, cfg: Config = DEFAULT, w_pcc: float = 1.0, w_ssim: float = 1.0, w_mse: float = 1.0,
+                 w_worst: float = 0.0):
         super().__init__()
         self.cfg, self.w_pcc, self.w_ssim, self.w_mse = cfg, w_pcc, w_ssim, w_mse
+        self.w_worst = w_worst  # штраф за худшую плоскость: не даёт сети «жертвовать» одной из 4
 
     def forward(self, rec: torch.Tensor, tgt: torch.Tensor):
         rec_n = normalize(rec, self.cfg.recon_norm)
@@ -28,4 +30,8 @@ class HoloLoss(torch.nn.Module):
         ssim = ssim_global(rec_n, tgt)
         mse = scale_invariant_mse(rec, tgt)
         loss = self.w_pcc * (1 - pcc).mean() + self.w_ssim * (1 - ssim).mean() + self.w_mse * mse.mean()
-        return loss, {"loss": loss.item(), "pcc": pcc.mean().item(), "ssim": ssim.mean().item()}
+        worst = pcc.min(dim=1).values  # (B,) КК худшей плоскости в каждом наборе
+        if self.w_worst:
+            loss = loss + self.w_worst * (1 - worst).mean()
+        return loss, {"loss": loss.item(), "pcc": pcc.mean().item(), "ssim": ssim.mean().item(),
+                      "worst": worst.mean().item()}
