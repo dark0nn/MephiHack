@@ -63,11 +63,11 @@ docker build -t doe-gpu --build-arg TORCH_INDEX=https://download.pytorch.org/whl
 | Бейзлайны GS/Adam на буквах | `docker run --rm -v "$PWD/outputs:/app/outputs" doe python scripts/run_baseline.py --targets data/examples/letters` |
 | Обучение на CPU (быстрая проверка) | `docker run --rm -v "$PWD/checkpoints:/app/checkpoints" doe python scripts/train.py --steps 200 --batch 4 --base 16 --workers 0` |
 | Обучение на NVIDIA GPU | `docker run --rm --gpus all --shm-size=2g -v "$PWD/checkpoints:/app/checkpoints" -v "$PWD/data/images:/app/data/images" doe-gpu python scripts/train.py --steps 3000 --batch 16` |
-| Финальный результат | `docker run --rm -v "$PWD/checkpoints:/app/checkpoints" -v "$PWD/outputs:/app/outputs" doe python scripts/infer.py --weights checkpoints/<run>/best.pt --targets data/examples/shapes` |
+| Финальный результат (берёт последнюю обученную сеть) | `docker run --rm -v "$PWD/checkpoints:/app/checkpoints" -v "$PWD/outputs:/app/outputs" doe python scripts/infer.py --weights "$(ls -td checkpoints/*/ \| head -1)best.pt" --targets data/examples/shapes` |
 | JupyterLab на http://localhost:8888 | `docker run --rm -p 8888:8888 -v "$PWD/notebooks:/app/notebooks" -v "$PWD/outputs:/app/outputs" doe jupyter lab --ip=0.0.0.0 --no-browser --allow-root --ServerApp.token=''` |
 
 Любую команду из таблицы «Основные команды» ниже можно запустить так же:
-`docker run --rm doe <команда>`.
+`docker run --rm doe` + команда, например `docker run --rm doe python scripts/check_env.py`.
 
 Флаг `-v "$PWD/outputs:/app/outputs"` связывает папку на компьютере с папкой в контейнере. Без него
 результаты останутся внутри контейнера и пропадут после его завершения.
@@ -91,6 +91,47 @@ python scripts/check_env.py
 ```
 
 ## Если что-то не работает
+
+### Четыре самых частых сценария
+
+**1. Docker не запускается**
+
+Ошибка: `docker: command not found`, `'docker' is not recognized` или `Cannot connect to the Docker daemon`.
+Причина: Docker не установлен или не запущен.
+
+```bash
+docker --version             # нет ответа -> поставить Docker Desktop, перезапустить терминал
+docker run --rm hello-world  # ошибка про daemon -> открыть Docker Desktop, дождаться «Engine running»
+```
+
+На Linux вместо Docker Desktop: `sudo systemctl start docker`.
+
+**2. Сборка образа падает на установке пакетов**
+
+Ошибка: `No matching distribution found for torch` или `manifest for python:... not found`.
+Причина: под версию Python из `Dockerfile` ещё нет нужной сборки PyTorch или образа Python.
+Что делать: в первой строке `Dockerfile` поставить версию постарше и собрать заново.
+
+```bash
+# в Dockerfile:  FROM python:3.13-slim
+docker build -t doe .
+```
+
+**3. Результатов нет в `outputs/` или правки в коде не применяются**
+
+Причина: контейнер работает со своей копией файлов.
+- Нет результатов → в команде не хватает `-v "$PWD/outputs:/app/outputs"`. На Windows в PowerShell пишите `${PWD}`, в cmd — `%cd%`.
+- Правки не видны → код копируется в образ при сборке. Пересоберите: `docker build -t doe .`
+
+**4. Обучение обрывается**
+
+Ошибка: `Killed`, код `137`, `Bus error` или `DataLoader worker ... killed`.
+Причина: контейнеру не хватает памяти.
+- Docker Desktop → Settings → Resources → Memory: 8 ГБ или больше.
+- Добавить к `docker run` флаг `--shm-size=2g`.
+- Или уменьшить нагрузку: `--batch 4 --workers 0`.
+
+### Другие ошибки
 
 | Ошибка | Что делать |
 | --- | --- |
@@ -121,7 +162,7 @@ python scripts/check_env.py
 | Быстрая проверка обучения | `python scripts/train.py --steps 200 --batch 4 --base 16 --workers 0` |
 | Полное обучение (лучше на GPU/Colab) | `python scripts/train.py --steps 3000 --batch 16` |
 | Дообучить готовую сеть: штраф худшей плоскости + 5 итераций GS в модели | `python scripts/train.py --resume checkpoints/unet_20261106_2255/best.pt --steps 2000 --lr 3e-4 --w-worst 1 --gs-iters 5` |
-| Финальный результат по ТЗ | `python scripts/infer.py --weights checkpoints/<run>/best.pt --targets <папка с 4 PNG>` |
+| Финальный результат по ТЗ (последняя обученная сеть, папка с 4 PNG) | `python scripts/infer.py --weights "$(ls -td checkpoints/*/ \| head -1)best.pt" --targets data/examples/shapes` |
 | То же + дотюнивание фазы | добавить `--refine 50` |
 
 Результаты лежат в `outputs/`: `doe.png` (0 = −π, 255 = +π), `recon_1..4.png`, `metrics.json`.
