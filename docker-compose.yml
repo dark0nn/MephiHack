@@ -1,0 +1,45 @@
+# docker compose run --rm doe                 — бейзлайны GS/Adam на буквах
+# docker compose run --rm doe python -m pytest -q
+# docker compose up jupyter                   — JupyterLab на http://localhost:8888
+# docker compose run --rm train-gpu           — обучение на NVIDIA GPU
+services:
+  doe:
+    build: .
+    image: doe-hackathon:cpu
+    volumes:
+      - ./outputs:/app/outputs
+      - ./checkpoints:/app/checkpoints
+      - ./data/images:/app/data/images
+    command: python scripts/run_baseline.py --targets data/examples/letters
+
+  jupyter:
+    image: doe-hackathon:cpu
+    build: .
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/app/notebooks
+      - ./outputs:/app/outputs
+      - ./checkpoints:/app/checkpoints
+    command: >
+      jupyter lab --ip=0.0.0.0 --no-browser --allow-root
+      --ServerApp.token='' --ServerApp.password=''
+
+  train-gpu:
+    build:
+      context: .
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cu128
+    image: doe-hackathon:gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./outputs:/app/outputs
+      - ./checkpoints:/app/checkpoints
+      - ./data/images:/app/data/images
+    command: python scripts/train.py --steps 3000 --batch 16

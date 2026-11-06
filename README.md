@@ -44,6 +44,21 @@ source .venv/bin/activate
 
 Результаты лежат в `outputs/`: `doe.png` (0 = −π, 255 = +π), `recon_1..4.png`, `metrics.json`.
 
+## Docker
+
+Образ со всеми зависимостями (Python 3.12, PyTorch, Jupyter). При сборке сразу генерируются примеры и прогоняются тесты.
+
+| Что | Команда |
+| --- | --- |
+| Собрать образ (CPU) | `docker compose build doe` |
+| Бейзлайны на буквах | `docker compose run --rm doe` |
+| Тесты | `docker compose run --rm doe python -m pytest -q` |
+| JupyterLab на http://localhost:8888 | `docker compose up jupyter` |
+| Обучение на NVIDIA GPU | `docker compose run --rm train-gpu` |
+
+Результаты и веса сохраняются в `outputs/` и `checkpoints/` на хосте. На Mac Docker не видит видеоядро (mps), поэтому
+для обучения на Mac удобнее `.venv`, а Docker нужен для GPU-сервера и для одинакового окружения у всей команды.
+
 ## Структура
 
 ```

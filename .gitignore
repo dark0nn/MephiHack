@@ -8,3 +8,4 @@ checkpoints/
 outputs/
 data/images/*
 !data/images/.gitkeep
+MephiHack/
