@@ -10,7 +10,7 @@
 #       python scripts/run_baseline.py --targets data/examples/letters
 #   docker run --rm --gpus all -v "$PWD/checkpoints:/app/checkpoints" doe-hackathon:gpu \
 #       python scripts/train.py --steps 3000 --batch 16
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 

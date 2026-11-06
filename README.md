@@ -27,11 +27,12 @@ cd ~/Documents/doe-hackathon
 source .venv/bin/activate
 ```
 
-Если `python3` не найден: `brew install python@3.12` (или установщик с python.org).
+Проект рассчитан на **Python 3.15** (подходит 3.11–3.15). Поставить: `brew install python@3.15`
+(или установщик с python.org). Если `.venv` был создан на другой версии, `setup_env.sh` пересоздаст его сам.
 
 ## Установка на Windows
 
-1. Поставить Python 3.12 (в PowerShell): `winget install Python.Python.3.12`,
+1. Поставить Python 3.15 (в PowerShell): `winget install Python.Python.3.15`,
    потом **закрыть и заново открыть** терминал / VS Code. Заглушка `python3` из Microsoft Store
    не подходит (ошибка `Permission denied`): её можно выключить в «Параметры → Приложения →
    Псевдонимы выполнения приложений».
@@ -63,7 +64,7 @@ bash setup_env.sh
 
 ## Docker
 
-Образ со всеми зависимостями (Python 3.12, PyTorch, Jupyter). При сборке сразу генерируются примеры и прогоняются тесты.
+Образ со всеми зависимостями (Python 3.15, PyTorch, Jupyter). При сборке сразу генерируются примеры и прогоняются тесты.
 
 | Что | Команда |
 | --- | --- |
