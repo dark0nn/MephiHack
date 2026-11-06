@@ -10,5 +10,4 @@ outputs
 MephiHack
 doe-hackathon
 Dockerfile
-docker-compose.yml
 .dockerignore
