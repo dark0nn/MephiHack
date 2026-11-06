@@ -1,14 +1,14 @@
 # DOE hackathon: все зависимости проекта в одном образе.
 #
 # CPU (по умолчанию):
-#   docker build -t doe-hackathon:cpu .
+#   docker build -t doe .
 # GPU (NVIDIA, нужен nvidia-container-toolkit на хосте):
-#   docker build -t doe-hackathon:gpu --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu128 .
+#   docker build -t doe-gpu --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu128 .
 #
 # Запуск:
-#   docker run --rm -v "$PWD/outputs:/app/outputs" doe-hackathon:cpu \
+#   docker run --rm -v "$PWD/outputs:/app/outputs" doe \
 #       python scripts/run_baseline.py --targets data/examples/letters
-#   docker run --rm --gpus all -v "$PWD/checkpoints:/app/checkpoints" doe-hackathon:gpu \
+#   docker run --rm --gpus all -v "$PWD/checkpoints:/app/checkpoints" doe-gpu \
 #       python scripts/train.py --steps 3000 --batch 16
 FROM python:3.15-slim
 
