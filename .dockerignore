@@ -7,6 +7,7 @@
 .DS_Store
 checkpoints
 outputs
+data/images
 MephiHack
 doe-hackathon
 Dockerfile

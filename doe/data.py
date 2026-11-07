@@ -18,18 +18,61 @@ from .synth import synth_image
 
 
 class FolderImages:
-    """Все картинки из папки (рекурсивно), приведённые к n×n серым."""
+    """Все картинки из папки (рекурсивно), приведённые к n×n серым.
+
+    Понимает два формата:
+      * отдельные файлы картинок (png, jpg, ...);
+      * массивы .npy формы (K, h, w) uint8 — целые датасеты одним файлом
+        (MNIST, Fashion-MNIST: см. scripts/get_datasets.py). Открываются через mmap,
+        поэтому в память не грузятся и работают с несколькими workers.
+    Вероятность выбрать источник пропорциональна числу картинок в нём.
+    """
 
     def __init__(self, root, n: int = 128, max_files: int | None = None):
-        self.paths = sorted(p for p in Path(root).rglob("*") if p.suffix.lower() in IMG_EXT)[:max_files]
+        root = Path(root)
+        self.paths = sorted(p for p in root.rglob("*") if p.suffix.lower() in IMG_EXT)[:max_files]
+        self.arrays = []                                  # (путь, число картинок); сам массив — лениво
+        for p in sorted(root.rglob("*.npy")):
+            arr = np.load(p, mmap_mode="r")
+            if arr.ndim == 3 and len(arr) > 0:
+                self.arrays.append((p, len(arr)))
+        self._mm = {}
         self.n = n
 
+    def __getstate__(self):
+        # в процессы DataLoader передаём только пути: mmap откроется в каждом заново,
+        # а не будет копироваться целиком (на Mac workers запускаются через spawn)
+        st = self.__dict__.copy()
+        st["_mm"] = {}
+        return st
+
+    def _array(self, path):
+        if path not in self._mm:
+            self._mm[path] = np.load(path, mmap_mode="r")
+        return self._mm[path]
+
     def __len__(self):
-        return len(self.paths)
+        return len(self.paths) + sum(k for _, k in self.arrays)
+
+    def describe(self) -> str:
+        parts = [f"{p.stem}: {k:,}" for p, k in self.arrays]
+        if self.paths:
+            parts.append(f"файлы: {len(self.paths):,}")
+        return ", ".join(parts)
+
+    def _raw(self, rng: np.random.Generator) -> Image.Image:
+        i = int(rng.integers(len(self)))
+        if i < len(self.paths):
+            return Image.open(self.paths[i]).convert("L")
+        i -= len(self.paths)
+        for path, k in self.arrays:
+            if i < k:
+                return Image.fromarray(np.ascontiguousarray(self._array(path)[i], dtype=np.uint8))
+            i -= k
+        raise IndexError(i)
 
     def sample(self, rng: np.random.Generator) -> np.ndarray:
-        p = self.paths[int(rng.integers(len(self.paths)))]
-        img = Image.open(p).convert("L").resize((self.n, self.n), Image.BILINEAR)
+        img = self._raw(rng).resize((self.n, self.n), Image.BILINEAR)
         a = np.asarray(img, dtype=np.float32) / 255.0
         if a.mean() > 0.5:  # тёмный фон, светлый объект — как у голограмм
             a = 1.0 - a

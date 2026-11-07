@@ -14,7 +14,7 @@ def main():
     try:
         import torch
     except ImportError:
-        print("PyTorch НЕ установлен: соберите Docker-образ или выполните pip install -r requirements.txt (см. README)")
+        print("PyTorch НЕ установлен: выполните python -m pip install -r requirements.txt (см. README)")
         return
     from doe import DEFAULT, optics_np
     from doe.baselines import run

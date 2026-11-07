@@ -4,8 +4,8 @@
   * torch-версии (pearson, ssim_global) — дифференцируемые, для лосса;
   * evaluate() — «как у жюри»: на 8-битных картинках, numpy.
 
-ВНИМАНИЕ: SSIM на слайде записан глобально (по всему кадру). skimage считает его
-в скользящем окне — числа будут другими. evaluate() выдаёт оба варианта,
+ВНИМАНИЕ: SSIM на слайде записан глобально (по всему кадру). Оконный SSIM (окно 7×7,
+как skimage.metrics.structural_similarity по умолчанию) даёт другие числа. evaluate() выдаёт оба варианта,
 пока организаторы не скажут, какой используют.
 """
 from __future__ import annotations
@@ -82,17 +82,35 @@ def ssim_global_np(a: np.ndarray, b: np.ndarray, L: float = 255.0) -> float:
     return float((2 * ma * mb + c1) * (2 * cov + c2) / ((ma ** 2 + mb ** 2 + c1) * (va + vb + c2)))
 
 
+def _box_mean(x: np.ndarray, w: int) -> np.ndarray:
+    """Среднее по всем окнам w×w без выхода за край (только «полные» окна)."""
+    c = np.pad(x, ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+    return (c[w:, w:] - c[:-w, w:] - c[w:, :-w] + c[:-w, :-w]) / (w * w)
+
+
+def ssim_windowed_np(a: np.ndarray, b: np.ndarray, L: float = 255.0, win: int = 7) -> float:
+    """Оконный SSIM, как skimage.metrics.structural_similarity с параметрами по умолчанию
+    (равномерное окно 7×7, выборочная ковариация, среднее по окнам без краёв). Без scipy/skimage."""
+    a = a.astype(np.float64); b = b.astype(np.float64)
+    c1, c2 = (0.01 * L) ** 2, (0.03 * L) ** 2
+    norm = win * win / (win * win - 1)
+    ua, ub = _box_mean(a, win), _box_mean(b, win)
+    va = norm * (_box_mean(a * a, win) - ua * ua)
+    vb = norm * (_box_mean(b * b, win) - ub * ub)
+    cov = norm * (_box_mean(a * b, win) - ua * ub)
+    s = (2 * ua * ub + c1) * (2 * cov + c2) / ((ua ** 2 + ub ** 2 + c1) * (va + vb + c2))
+    return float(s.mean())
+
+
 def evaluate(recons_u8, targets_u8) -> dict:
     """Попарные метрики для 4 пар «исходное — восстановленное» (оба uint8)."""
-    from skimage.metrics import structural_similarity
-
     rows = []
     for i, (r, t) in enumerate(zip(recons_u8, targets_u8), start=1):
         rows.append({
             "plane": i,
             "pearson": pearson_np(t, r),
             "ssim_global": ssim_global_np(t, r),
-            "ssim_windowed": float(structural_similarity(t, r, data_range=255)),
+            "ssim_windowed": ssim_windowed_np(t, r),
         })
     mean = {k: float(np.mean([r[k] for r in rows])) for k in ("pearson", "ssim_global", "ssim_windowed")}
     return {"planes": rows, "mean": mean}
