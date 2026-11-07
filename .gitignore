@@ -9,3 +9,4 @@ outputs/
 data/images/*
 !data/images/.gitkeep
 MephiHack/
+.runner/
